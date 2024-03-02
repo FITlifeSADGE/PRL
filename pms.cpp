@@ -65,14 +65,14 @@ int main(int argc, char *argv[]) {
         file.close();
     }
     else {
-        while (true) {
-            int number = 0;
-            int to_send = 0; 
-            int send_count = 0;
-            int TAG = 1;
-            int read_from_lower = 0;
-            int read_from_upper = 0;
-            MPI_Status status;
+        int number = 0;
+        int to_send = 0; 
+        int send_count = 0;
+        int TAG = 1;
+        int read_from_lower = 0;
+        int read_from_upper = 0;
+        MPI_Status status;
+        while (true) {        
             MPI_Recv(&number, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status); //přijetí čísla od předchozího procesoru
             std::cout << "Process " << comm_rank << " Received " << number << " from " << status.MPI_SOURCE << " with TAG " << status.MPI_TAG << std::endl;
             if (status.MPI_TAG == 0) {
@@ -88,17 +88,17 @@ int main(int argc, char *argv[]) {
                 lower.push(number);
             }
             if ((upper.size() >= pow(2, comm_rank - 1) && lower.size() >= 1) || (lower.size() >= pow(2, comm_rank - 1) && upper.size() >= 1)) { //pokud má jedna fronta úplnou posloupnost a druhá alespoň jedno číslo
-                for (int i = 0; i < (2 ^ (comm_rank - 1) + 1); i++) { // provede se 2 ^ (comm_rank - 1) + 1 přesunů
-                    if (read_from_upper < (2 ^ (comm_rank - 1)) && read_from_lower < (2 ^ (comm_rank - 1))) { // Pokud ještě nebylo přečteno dost čísel z jedné fronty, vybírá se minimum z obou front
+                for (int i = 0; i < (pow(2, comm_rank - 1) + 1); i++) { // provede se 2 ^ (comm_rank - 1) + 1 přesunů
+                    if (read_from_upper < (pow(2, comm_rank - 1)) && read_from_lower < (pow(2, comm_rank - 1))) { // Pokud ještě nebylo přečteno dost čísel z jedné fronty, vybírá se minimum z obou front
                         to_send = select_min_from_queues(upper, lower, read_from_upper, read_from_lower);
                     }
-                    else if (read_from_upper == (2 ^ (comm_rank - 1))) { // pokud jsem přečetl moc čísel z horní fronty, přečtu z dolní
+                    else if (read_from_upper == (pow(2, comm_rank - 1))) { // pokud jsem přečetl moc čísel z horní fronty, přečtu z dolní
                         to_send = lower.front();
                         lower.pop();
                         read_from_lower++;
                         read_from_upper = 0;
                     }
-                    else if (read_from_lower == (2 ^ (comm_rank - 1))) { // pokud jsem přečetl moc čísel z dolní fronty, přečtu z horní
+                    else if (read_from_lower == (pow(2, comm_rank - 1))) { // pokud jsem přečetl moc čísel z dolní fronty, přečtu z horní
                         to_send = upper.front();
                         upper.pop();
                         read_from_upper++;
@@ -122,11 +122,14 @@ int main(int argc, char *argv[]) {
                             }
                         }
                     }
+                    else { // pokud jsem poslední procesor, přidám číslo do vektoru
+                        sorted_numbers.push_back(to_send); // UPRAVIT, ZJISTIT, JAK MA PRACOVAT POSLEDNI PROCESOR
+                    }
                 }
+                read_from_lower = 0;
+                read_from_upper = 0;
             }
-            if (comm_rank == comm_size - 1) { // pokud jsem poslední procesor, přidám číslo do vektoru
-                sorted_numbers.push_back(number);
-            }
+            
         }
     }
     MPI_Finalize();
