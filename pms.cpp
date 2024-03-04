@@ -72,10 +72,10 @@ int main(int argc, char *argv[]) {
         while (file.read(reinterpret_cast<char*>(&number), sizeof(number))) {
             int_number = static_cast<int>(number);
             std::cout << int_number << " ";
-            MPI_Send(&int_number, 1, MPI_INT, 1, TAG, MPI_COMM_WORLD);
+            MPI_Ssend(&int_number, 1, MPI_INT, 1, TAG, MPI_COMM_WORLD);
             TAG = TAG == 1 ? 2 : 1; // prohození TAGu
         }
-        MPI_Send(&number, 1, MPI_INT, 1, 0, MPI_COMM_WORLD); // poslání TAG 0 (konec souboru
+        MPI_Ssend(&number, 1, MPI_INT, 1, 0, MPI_COMM_WORLD); // poslání TAG 0 (konec souboru
         std::cout << std::endl;
         file.close();
     }
@@ -89,7 +89,6 @@ int main(int argc, char *argv[]) {
         MPI_Status status;
         while (true) {        
             MPI_Recv(&number, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status); //přijetí čísla od předchozího procesoru
-            //std::cout << "Process " << comm_rank << " Received " << number << " from " << status.MPI_SOURCE << " with TAG " << status.MPI_TAG << std::endl;
             if (status.MPI_TAG == 0) {
                 if (comm_rank < comm_size - 1) {
                     int rest = 1;
@@ -98,6 +97,8 @@ int main(int argc, char *argv[]) {
                         if (rest == -1) {
                             break;
                         }
+                        MPI_Ssend(&rest, 1, MPI_INT, comm_rank + 1, TAG, MPI_COMM_WORLD);
+                        send_count++;
                         if (TAG == 1) { // prohození TAGu po odeslání 2 ^ (comm_rank) čísel
                             if (send_count == pow(2, comm_rank)) {
                                 TAG = 2;
@@ -115,11 +116,8 @@ int main(int argc, char *argv[]) {
                                 to_send_from_upper = pow(2, comm_rank - 1);
                             }
                         }
-                        MPI_Send(&rest, 1, MPI_INT, comm_rank + 1, TAG, MPI_COMM_WORLD);
-                        send_count++;
-                        //std::cout << "Process " << comm_rank << " Sent " << rest << " to " << comm_rank + 1 << " with TAG " << TAG << std::endl;
                     }
-                    MPI_Send(&rest, 1, MPI_INT, comm_rank + 1, 0, MPI_COMM_WORLD);
+                    MPI_Ssend(&rest, 1, MPI_INT, comm_rank + 1, 0, MPI_COMM_WORLD);
                 }
                 else {
                     int rest = 1;
@@ -142,8 +140,7 @@ int main(int argc, char *argv[]) {
             if ((upper.size() >= pow(2, comm_rank - 1) && lower.size() >= 1)) { //pokud má jedna fronta úplnou posloupnost a druhá alespoň jedno číslo
                 to_send = select_max_from_queues(upper, lower, &to_send_from_lower, &to_send_from_upper);
                 if (comm_rank < comm_size - 1) { // pokud jsem nejsem poslední procesor, pošlu číslo dalšímu procesoru
-                    MPI_Send(&to_send, 1, MPI_INT, comm_rank + 1, TAG, MPI_COMM_WORLD);
-                    //std::cout << "Process " << comm_rank << " Sent " << to_send << " to " << comm_rank + 1 << " with TAG " << TAG << std::endl;
+                    MPI_Ssend(&to_send, 1, MPI_INT, comm_rank + 1, TAG, MPI_COMM_WORLD);
                     send_count++;
                     if (TAG == 1) { // prohození TAGu po odeslání 2 ^ (comm_rank) čísel
                         if (send_count == pow(2, comm_rank)) {
@@ -163,7 +160,7 @@ int main(int argc, char *argv[]) {
                     }
                 }
                 else { // pokud jsem poslední procesor, přidám číslo do vektoru
-                    sorted_numbers.push_back(to_send); // UPRAVIT, ZJISTIT, JAK MA PRACOVAT POSLEDNI PROCESOR
+                    sorted_numbers.push_back(to_send); //
                 }
             }
             
