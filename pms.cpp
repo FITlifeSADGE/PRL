@@ -1,3 +1,7 @@
+/* Autor: Lukáš Kaprál (xkapra00)
+*  Datum: 2024-04-03
+*  Projekt: Pipeline Merge Sort
+*/
 #include <iostream>
 #include <mpi.h>
 #include <fstream>
@@ -8,42 +12,37 @@
 int select_max_from_queues(std::queue<int> &upper, std::queue<int> &lower, int *to_send_from_lower, int *to_send_from_upper) {
     if (upper.empty() && lower.empty()) {
         return -1;
-    } else if (upper.empty()) {
-        int value = lower.front();
-        lower.pop();
-        *to_send_from_lower = *to_send_from_lower - 1;
-        return value;
-    } else if (lower.empty()) {
+    }
+    // Zvolíme z horní, pokud není prázdná, můžeme z ní posílat a dolní je prázdná nebo má menší než horní nebo nemůžeme posílat z dolní
+    bool selectUpper = (!upper.empty() && (*to_send_from_upper > 0 || lower.empty()) && (lower.empty() || upper.front() > lower.front() || *to_send_from_lower <= 0));
+
+    // Zvolíme z dolní, pokud není prázdná, můžeme z ní posílat a horní je prázdná nebo má menší než dolní nebo nemůžeme posílat z horní
+    bool selectLower = (!lower.empty() && (*to_send_from_lower > 0 || upper.empty()) && (upper.empty() || lower.front() >= upper.front() || *to_send_from_upper <= 0));
+
+    if (selectUpper) {
         int value = upper.front();
         upper.pop();
-        *to_send_from_upper = *to_send_from_upper - 1;
+        *to_send_from_upper -= 1;
         return value;
-    } else {
-        if (upper.front() > lower.front()) {
-            if (*to_send_from_upper > 0) {
-                int value = upper.front();
-                upper.pop();
-                *to_send_from_upper = *to_send_from_upper - 1;
-                return value;
-            } else {
-                int value = lower.front();
-                lower.pop();
-                *to_send_from_lower = *to_send_from_lower - 1;
-                return value;
-            }
-        } else {
-            if (*to_send_from_lower > 0) {
-                int value = lower.front();
-                lower.pop();
-                *to_send_from_lower = *to_send_from_lower - 1;
-                return value;
-            }
-            else {
-                int value = upper.front();
-                upper.pop();
-                *to_send_from_upper = *to_send_from_upper - 1;
-                return value;
-            }
+    } else if (selectLower) {
+        int value = lower.front();
+        lower.pop();
+        *to_send_from_lower -= 1;
+        return value;
+    }
+
+    // Kdyby se něco pokazilo
+    return -1;
+}
+
+void TAG_swap (int *TAG, int *send_count, int *to_send_from_lower, int *to_send_from_upper, int comm_rank) {
+    // Pokud procesor odeslal 2^(rank) hodnot, prohodí výstup
+    if (*send_count == pow(2, comm_rank)) {
+        *send_count = 0; // Opět budeme počítat počet odeslaných od 0
+        *to_send_from_lower = pow(2, comm_rank - 1); // Bude zbývat odeslat 2^(rank-1) hodnot z dolní fronty
+        *to_send_from_upper = pow(2, comm_rank - 1); // Bude zbývat odeslat 2^(rank-1) hodnot z horní fronty
+        if (*TAG == 1 || *TAG == 2) { // Kdyby přišel TAG 0, nestane se nic
+            *TAG = *TAG == 1 ? 2 : 1; // Prohodí TAG
         }
     }
 }
@@ -99,23 +98,7 @@ int main(int argc, char *argv[]) {
                         }
                         MPI_Ssend(&rest, 1, MPI_INT, comm_rank + 1, TAG, MPI_COMM_WORLD);
                         send_count++;
-                        if (TAG == 1) { // prohození TAGu po odeslání 2 ^ (comm_rank) čísel
-                            if (send_count == pow(2, comm_rank)) {
-                                TAG = 2;
-                                send_count = 0;
-                                to_send_from_lower = pow(2, comm_rank - 1);
-                                to_send_from_upper = pow(2, comm_rank - 1);
-                            }
-                        
-                        }
-                        else if (TAG == 2) { // prohození TAGu po odeslání 2 ^ (comm_rank) čísel
-                            if (send_count == pow(2, comm_rank)) {
-                                TAG = 1;
-                                send_count = 0;
-                                to_send_from_lower = pow(2, comm_rank - 1);
-                                to_send_from_upper = pow(2, comm_rank - 1);
-                            }
-                        }
+                        TAG_swap(&TAG, &send_count, &to_send_from_lower, &to_send_from_upper, comm_rank);
                     }
                     MPI_Ssend(&rest, 1, MPI_INT, comm_rank + 1, 0, MPI_COMM_WORLD);
                 }
@@ -142,22 +125,7 @@ int main(int argc, char *argv[]) {
                 if (comm_rank < comm_size - 1) { // pokud jsem nejsem poslední procesor, pošlu číslo dalšímu procesoru
                     MPI_Ssend(&to_send, 1, MPI_INT, comm_rank + 1, TAG, MPI_COMM_WORLD);
                     send_count++;
-                    if (TAG == 1) { // prohození TAGu po odeslání 2 ^ (comm_rank) čísel
-                        if (send_count == pow(2, comm_rank)) {
-                            TAG = 2;
-                            send_count = 0;
-                            to_send_from_lower = pow(2, comm_rank - 1);
-                            to_send_from_upper = pow(2, comm_rank - 1);
-                        }
-                    }
-                    else if (TAG == 2) { // prohození TAGu po odeslání 2 ^ (comm_rank) čísel
-                        if (send_count == pow(2, comm_rank)) {
-                            TAG = 1;
-                            send_count = 0;
-                            to_send_from_lower = pow(2, comm_rank - 1);
-                            to_send_from_upper = pow(2, comm_rank - 1);
-                        }
-                    }
+                    TAG_swap(&TAG, &send_count, &to_send_from_lower, &to_send_from_upper, comm_rank);
                 }
                 else { // pokud jsem poslední procesor, přidám číslo do vektoru
                     sorted_numbers.push_back(to_send); //
