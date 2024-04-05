@@ -6,6 +6,7 @@ if [ $# -lt 1 ]; then
 fi
 
 file=$1
+iterations=$2
 numbers=$(wc -l < "$file")
 
 # pocet procesoru
@@ -14,4 +15,4 @@ proc=$numbers
 mpic++ --prefix /usr/local/share/OpenMPI -o life life.cpp
 
 #spusteni programu
-mpirun --prefix /usr/local/share/OpenMPI  -np $proc life $file 1
+mpirun --prefix /usr/local/share/OpenMPI  -np $proc life $file $iterations

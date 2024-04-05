@@ -37,26 +37,8 @@ else {
 }
 }
 
-std::string get_neighbours_first_last(const std::string &line, const std::string &neighbour) {
-    std::vector<char> neighbours;
-    std::string final = "";
-    for (int i = 0; i < line.size(); ++i) {
-        neighbours.clear();
 
-        int neighbour_left = (i == 0) ? line.size() - 1 : i - 1; // vezmu prvek nalevo
-        int neighbour_right = (i == line.size() - 1) ? 0 : i + 1; // vezmu prvek napravo
-
-        neighbours.push_back(neighbour[neighbour_left]);
-        neighbours.push_back(neighbour[i]);
-        neighbours.push_back(neighbour[neighbour_right]);
-        neighbours.push_back(line[neighbour_left]);
-        neighbours.push_back(line[neighbour_right]);
-        final += change_cell(line[i], neighbours);
-    }
-    return final;
-}
-
-std::string get_neighbours_rest(const std::string &line, const std::string &neighbour1, const std::string &neighbour2) {
+std::string get_neighbours(const std::string &line, const std::string &neighbour1, const std::string &neighbour2) {
     std::vector<char> neighbours;
     std::string final = "";
     for (int i = 0; i < line.size(); ++i) {
@@ -81,14 +63,16 @@ std::string get_neighbours_rest(const std::string &line, const std::string &neig
 
 void send_to_others(const std::string &line, int comm_rank, int comm_size) {
     if (comm_rank == 0) {
-        MPI_Send(line.c_str(), line.size(), MPI_CHAR, comm_rank + 1, 0, MPI_COMM_WORLD);
+        MPI_Send(line.c_str(), line.size(), MPI_CHAR, comm_size - 1, 0, MPI_COMM_WORLD);
+        MPI_Send(line.c_str(), line.size(), MPI_CHAR, comm_rank + 1, 1, MPI_COMM_WORLD);      
     }
     if (comm_rank == comm_size - 1) {
         MPI_Send(line.c_str(), line.size(), MPI_CHAR, comm_rank - 1, 0, MPI_COMM_WORLD);
+        MPI_Send(line.c_str(), line.size(), MPI_CHAR, 0, 1, MPI_COMM_WORLD);
     }
     if (comm_rank != 0 && comm_rank != comm_size - 1) {
         MPI_Send(line.c_str(), line.size(), MPI_CHAR, comm_rank - 1, 0, MPI_COMM_WORLD);
-        MPI_Send(line.c_str(), line.size(), MPI_CHAR, comm_rank + 1, 0, MPI_COMM_WORLD);
+        MPI_Send(line.c_str(), line.size(), MPI_CHAR, comm_rank + 1, 1, MPI_COMM_WORLD);
     }
 }
 
@@ -97,42 +81,58 @@ void recv_from_others(int comm_rank, int comm_size, const std::string &line, int
     char recv_line[line_size + 1];
     char recv_line2[line_size + 1];
     MPI_Status status;
-    std::string new_line = "";
+    std::string new_line = line;
     for (int i = 0; i < iterations; i++) {
         if (comm_rank == 0) {
             MPI_Recv(recv_line, line_size, MPI_CHAR, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
             recv_line[line_size] = '\0';
-            new_line = get_neighbours_first_last(line, recv_line);
+
+            MPI_Recv(recv_line2, line_size, MPI_CHAR, MPI_ANY_SOURCE, 1, MPI_COMM_WORLD, &status);
+            recv_line2[line_size] = '\0';
+            new_line = get_neighbours(new_line, recv_line, recv_line2);
             if (i + 1 < iterations) {
-                MPI_Send(new_line.c_str(), new_line.size(), MPI_CHAR, comm_rank + 1, 0, MPI_COMM_WORLD);
+                MPI_Send(new_line.c_str(), new_line.size(), MPI_CHAR, comm_size - 1, 0, MPI_COMM_WORLD);
+                MPI_Send(new_line.c_str(), new_line.size(), MPI_CHAR, comm_rank + 1, 1, MPI_COMM_WORLD);
             }
-            i++;
         }
         if (comm_rank == comm_size - 1) {
             MPI_Recv(recv_line, line_size, MPI_CHAR, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
             recv_line[line_size] = '\0';
-            new_line = get_neighbours_first_last(line, recv_line);
+
+            MPI_Recv(recv_line2, line_size, MPI_CHAR, MPI_ANY_SOURCE, 1, MPI_COMM_WORLD, &status);
+            recv_line2[line_size] = '\0';
+            new_line = get_neighbours(new_line, recv_line, recv_line2);
             if (i + 1 < iterations) {
                 MPI_Send(new_line.c_str(), new_line.size(), MPI_CHAR, comm_rank - 1, 0, MPI_COMM_WORLD);
+                MPI_Send(new_line.c_str(), new_line.size(), MPI_CHAR, 0, 1, MPI_COMM_WORLD);
             }
-            i++;
         }
         if (comm_rank != 0 && comm_rank != comm_size - 1) {
             MPI_Recv(recv_line, line_size, MPI_CHAR, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
             recv_line[line_size] = '\0';
 
-            MPI_Recv(recv_line2, line_size, MPI_CHAR, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
+            MPI_Recv(recv_line2, line_size, MPI_CHAR, MPI_ANY_SOURCE, 1, MPI_COMM_WORLD, &status);
             recv_line2[line_size] = '\0';
-            new_line = get_neighbours_rest(line, recv_line, recv_line2);
+            new_line = get_neighbours(new_line, recv_line, recv_line2);
             if (i + 1 < iterations) {      
-                MPI_Send(new_line.c_str(), new_line.size(), MPI_CHAR, comm_rank + 1, 0, MPI_COMM_WORLD);
                 MPI_Send(new_line.c_str(), new_line.size(), MPI_CHAR, comm_rank - 1, 0, MPI_COMM_WORLD);
+                MPI_Send(new_line.c_str(), new_line.size(), MPI_CHAR, comm_rank + 1, 1, MPI_COMM_WORLD);
             }
-            i++;
         }
     }
-    std::cout << comm_rank << ": " << new_line << std::endl;
+    if (comm_rank == 0) {
+        std::cout << comm_rank << ": " << new_line << std::endl;
+        MPI_Send(0, 0, MPI_CHAR, comm_rank + 1, 9999, MPI_COMM_WORLD);
+    }
+    else {
+        MPI_Recv(recv_line, 1, MPI_CHAR, comm_rank - 1, 9999, MPI_COMM_WORLD, &status);
+        std::cout << comm_rank << ": " << new_line << std::endl;
+        if (comm_rank != comm_size - 1) {
+            MPI_Send(0, 0, MPI_CHAR, comm_rank + 1, 9999, MPI_COMM_WORLD);
+        }
+    }
 }
+
 
 
 int main(int argc, char *argv[]) {
@@ -155,7 +155,6 @@ int main(int argc, char *argv[]) {
     // Načtu řádku pro sebe
     if (std::getline(file, line)) {
         send_to_others(line, comm_rank, comm_size);
-        //std::cout << "Process " << comm_rank << " reads: " << line << std::endl;
     } else {
         std::cerr << "Něco se pokazilo" << std::endl;
         MPI_Abort(MPI_COMM_WORLD, 1);
