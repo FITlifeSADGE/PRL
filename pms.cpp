@@ -13,10 +13,10 @@ int select_max_from_queues(std::queue<int> &upper, std::queue<int> &lower, int *
     if (upper.empty() && lower.empty()) {
         return -1;
     }
-    // Zvolíme z horní, pokud není prázdná, můžeme z ní posílat a dolní je prázdná nebo má menší než horní nebo nemůžeme posílat z dolní
+    // Vezmu z horní, pokud není prázdná a můžu z ní posílat a dolní je prázdná nebo má menší než horní nebo nemůžu posílat z dolní
     bool selectUpper = (!upper.empty() && (*to_send_from_upper > 0 || lower.empty()) && (lower.empty() || upper.front() > lower.front() || *to_send_from_lower <= 0));
 
-    // Zvolíme z dolní, pokud není prázdná, můžeme z ní posílat a horní je prázdná nebo má menší než dolní nebo nemůžeme posílat z horní
+    // Vezmu z dolní, pokud není prázdná a můžu z ní posílat a horní je prázdná nebo má menší než dolní nebo nemůžu posílat z horní
     bool selectLower = (!lower.empty() && (*to_send_from_lower > 0 || upper.empty()) && (upper.empty() || lower.front() >= upper.front() || *to_send_from_upper <= 0));
 
     if (selectUpper) {
@@ -47,78 +47,67 @@ void TAG_swap (int *TAG, int *send_count, int *to_send_from_lower, int *to_send_
     }
 }
 
-int main(int argc, char *argv[]) {
-    MPI_Init(&argc, &argv);
+void rank0 (int comm_rank) {
+    std::ifstream file("numbers", std::ios::binary); // načtu soubor s čísly
 
-    int comm_rank, comm_size;
-    MPI_Comm_rank(MPI_COMM_WORLD, &comm_rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
-    std::queue<int> upper;
-    std::queue<int> lower;
-    std::vector<int> sorted_numbers;
-    // Procesor s rankem 0 načte vstupní posloupnost
-    if (comm_rank == 0) {
-        std::ifstream file("numbers", std::ios::binary);
-
-        // Zkontrolujeme, zda se podařilo soubor otevřít
-        if (!file.is_open()) {
-            std::cerr << "Failed to open the numbers file" << std::endl;
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-
-        unsigned char number;
-        int int_number, TAG = 1; // TAG 1 = horni vystup, TAG 2 = dolni vystup, TAG 0 = konec
-        while (file.read(reinterpret_cast<char*>(&number), sizeof(number))) {
-            int_number = static_cast<int>(number);
-            std::cout << int_number << " ";
-            MPI_Ssend(&int_number, 1, MPI_INT, 1, TAG, MPI_COMM_WORLD);
-            TAG = TAG == 1 ? 2 : 1; // prohození TAGu
-        }
-        MPI_Ssend(&number, 1, MPI_INT, 1, 0, MPI_COMM_WORLD); // poslání TAG 0 (konec souboru
-        std::cout << std::endl;
-        file.close();
+    if (!file.is_open()) {
+        std::cerr << "Failed to open the numbers file" << std::endl; // neotevřel se soubor
+        MPI_Abort(MPI_COMM_WORLD, 1);
     }
-    else {
-        int number = 0;
-        int to_send = 0; 
-        int send_count = 0;
-        int TAG = 1;
-        int to_send_from_upper = pow(2, comm_rank - 1);
-        int to_send_from_lower = pow(2, comm_rank - 1);
-        MPI_Status status;
-        while (true) {        
+
+    unsigned char number;
+    int int_number, TAG = 1;
+    while (file.read(reinterpret_cast<char*>(&number), sizeof(number))) { // čtu čísla ze souboru a převádím je na int
+        int_number = static_cast<int>(number);
+        std::cout << int_number << " ";
+        MPI_Ssend(&int_number, 1, MPI_INT, 1, TAG, MPI_COMM_WORLD); // všechny čísla posílám procesoru s rankem 1
+        TAG = TAG == 1 ? 2 : 1;
+    }
+    MPI_Ssend(&number, 1, MPI_INT, 1, 0, MPI_COMM_WORLD); // pošlu zprávu, že jsem poslal všechna čísla
+    std::cout << std::endl;
+    file.close();
+}
+
+void sorting_cycle (int comm_rank, int comm_size, std::queue<int> &upper, std::queue<int> &lower, std::vector<int> &sorted_numbers) {
+    int number = 0;
+    int to_send = 0;
+    int send_count = 0; // kolik jsem odeslal čísel
+    int TAG = 1; // TAG zprávy
+    int to_send_from_upper = pow(2, comm_rank - 1); // kolik se má ještě odeslat z horní fronty
+    int to_send_from_lower = pow(2, comm_rank - 1); // kolik se má ještě odeslat z dolní fronty
+    MPI_Status status;
+    while (true) {        
             MPI_Recv(&number, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status); //přijetí čísla od předchozího procesoru
-            if (status.MPI_TAG == 0) {
-                if (comm_rank < comm_size - 1) {
+            if (status.MPI_TAG == 0) { // už mi nepřijdou další čísla
+                if (comm_rank < comm_size - 1) { // pokud jsem nejsem poslední procesor, pošlu zbytek čísel dalšímu procesoru
                     int rest = 1;
                     while (true) {
-                        rest = select_max_from_queues(upper, lower, &to_send_from_lower, &to_send_from_upper);
-                        if (rest == -1) {
+                        rest = select_max_from_queues(upper, lower, &to_send_from_lower, &to_send_from_upper); // stále vybírám největší číslo
+                        if (rest == -1) { // když už nemám co posílat
                             break;
                         }
-                        MPI_Ssend(&rest, 1, MPI_INT, comm_rank + 1, TAG, MPI_COMM_WORLD);
-                        send_count++;
-                        TAG_swap(&TAG, &send_count, &to_send_from_lower, &to_send_from_upper, comm_rank);
+                        MPI_Ssend(&rest, 1, MPI_INT, comm_rank + 1, TAG, MPI_COMM_WORLD); // pošlu dalšímu procesoru
+                        send_count++; // zvýším počet odeslaných čísel
+                        TAG_swap(&TAG, &send_count, &to_send_from_lower, &to_send_from_upper, comm_rank); // zkontroluju, jestli se má prohodit TAG
                     }
-                    MPI_Ssend(&rest, 1, MPI_INT, comm_rank + 1, 0, MPI_COMM_WORLD);
+                    MPI_Ssend(&rest, 1, MPI_INT, comm_rank + 1, 0, MPI_COMM_WORLD); // pošlu zprávu, že jsem poslal všechna čísla
                 }
-                else {
+                else { // jsem poslední procesor
                     int rest = 1;
                     while (true) {
-                        rest = select_max_from_queues(upper, lower, &to_send_from_lower, &to_send_from_upper);
+                        rest = select_max_from_queues(upper, lower, &to_send_from_lower, &to_send_from_upper); // vybírám největší čísla a ukládám je do vektoru
                         if (rest == -1) {
                             break;
                         }
                         sorted_numbers.push_back(rest);
                     }
                 }
-                //std::cout << "Received TAG 0, breaking " << std::endl;
                 break;
             }
             if (status.MPI_TAG == 1) {
-                upper.push(number);
+                upper.push(number); // TAG 1 = horní výstup
             } else if (status.MPI_TAG == 2) {
-                lower.push(number);
+                lower.push(number); // TAG 2 = dolní výstup
             }
             if ((upper.size() >= pow(2, comm_rank - 1) && lower.size() >= 1)) { //pokud má jedna fronta úplnou posloupnost a druhá alespoň jedno číslo
                 to_send = select_max_from_queues(upper, lower, &to_send_from_lower, &to_send_from_upper);
@@ -133,15 +122,45 @@ int main(int argc, char *argv[]) {
             }
             
         }
+}
+
+int main(int argc, char *argv[]) {
+    MPI_Init(&argc, &argv);
+
+    int comm_rank, comm_size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &comm_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
+    std::queue<int> upper;
+    std::queue<int> lower;
+    std::vector<int> sorted_numbers;
+    if (comm_size < 2) { // pokud se zadá jenom jedno číslo
+        std::ifstream file("numbers", std::ios::binary);
+        if (!file.is_open()) {
+            std::cerr << "Failed to open the numbers file" << std::endl; // neotevřel se soubor
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
+
+        unsigned char number;
+        int int_number, TAG = 1;
+        while (file.read(reinterpret_cast<char*>(&number), sizeof(number))) {
+            int_number = static_cast<int>(number);
+            std::cout << int_number << std::endl; // vypíše se zadané číslo
+            std::cout << int_number << std::endl; // zadané číslo je rovnou seřazená posloupnost
+            MPI_Finalize();
+            return 0;
+        }
+    }
+    if (comm_rank == 0) {
+        rank0(comm_rank);
+    }
+    else {
+        sorting_cycle(comm_rank, comm_size, upper, lower, sorted_numbers);
     }
     MPI_Finalize();
-    //std::cout << "Finished" << std::endl;
     if (comm_rank == comm_size - 1) {
-        std::cout << "Processor " << comm_rank << ": Sorted numbers: ";
-        for (int i = 0; i < sorted_numbers.size(); i++) {
-            std::cout << sorted_numbers[i] << " ";
+        for (int i = sorted_numbers.size() - 1; i >= 0; i--) {
+            std::cout << sorted_numbers[i] << std::endl;
         }
-        std::cout << std::endl;
     }
     return 0;
 }
