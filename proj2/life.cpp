@@ -167,8 +167,7 @@ int main(int argc, char *argv[]) {
     
     recv_from_others(comm_rank, comm_size, line, iterations, all_lines);
     if (comm_rank == 0) {
-        std::cout << "0: " << line << std::endl;
-        for (int i = 1; i < comm_size; ++i) {
+        for (int i = 0; i < comm_size; ++i) {
             std::cout << i << ": " << all_lines[i] << std::endl;
         }
     }
