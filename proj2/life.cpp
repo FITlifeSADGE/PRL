@@ -76,12 +76,13 @@ void send_to_others(const std::string &line, int comm_rank, int comm_size) {
     }
 }
 
-void recv_from_others(int comm_rank, int comm_size, const std::string &line, int iterations) {
+void recv_from_others(int comm_rank, int comm_size, const std::string &line, int iterations, std::string *all_lines) {
     int line_size = line.size();
     char recv_line[line_size + 1];
     char recv_line2[line_size + 1];
     MPI_Status status;
     std::string new_line = line;
+
     for (int i = 0; i < iterations; i++) {
         if (comm_rank == 0) {
             MPI_Recv(recv_line, line_size, MPI_CHAR, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
@@ -121,15 +122,15 @@ void recv_from_others(int comm_rank, int comm_size, const std::string &line, int
         }
     }
     if (comm_rank == 0) {
-        std::cout << comm_rank << ": " << new_line << std::endl;
-        MPI_Send(0, 0, MPI_CHAR, comm_rank + 1, 9999, MPI_COMM_WORLD);
-    }
-    else {
-        MPI_Recv(recv_line, 1, MPI_CHAR, comm_rank - 1, 9999, MPI_COMM_WORLD, &status);
-        std::cout << comm_rank << ": " << new_line << std::endl;
-        if (comm_rank != comm_size - 1) {
-            MPI_Send(0, 0, MPI_CHAR, comm_rank + 1, 9999, MPI_COMM_WORLD);
+        for (int src = 1; src < comm_size; ++src) {
+            MPI_Recv(recv_line, line_size, MPI_CHAR, src, 9999-src, MPI_COMM_WORLD, &status);
+            recv_line[line_size] = '\0';
+            all_lines[src] = recv_line;
         }
+        all_lines[0] = new_line;
+    }
+    if (comm_rank != 0) {
+        MPI_Send(new_line.c_str(), new_line.size(), MPI_CHAR, 0, 9999-comm_rank, MPI_COMM_WORLD);
     }
 }
 
@@ -159,7 +160,18 @@ int main(int argc, char *argv[]) {
         std::cerr << "Něco se pokazilo" << std::endl;
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
-    recv_from_others(comm_rank, comm_size, line, iterations);
+    std::string *all_lines = nullptr;
+    if (comm_rank == 0) {
+        all_lines = new std::string[comm_size];
+    }
+    
+    recv_from_others(comm_rank, comm_size, line, iterations, all_lines);
+    if (comm_rank == 0) {
+        std::cout << "0: " << line << std::endl;
+        for (int i = 1; i < comm_size; ++i) {
+            std::cout << i << ": " << all_lines[i] << std::endl;
+        }
+    }
     MPI_Finalize();
     return 0;
 }
